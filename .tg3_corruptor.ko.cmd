@@ -1,0 +1,1 @@
+cmd_/home/jacob/BroadcomMemoryCorruptor/tg3_corruptor.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000 -T ./scripts/module-common.lds  --build-id  -o /home/jacob/BroadcomMemoryCorruptor/tg3_corruptor.ko /home/jacob/BroadcomMemoryCorruptor/tg3_corruptor.o /home/jacob/BroadcomMemoryCorruptor/tg3_corruptor.mod.o ;  true

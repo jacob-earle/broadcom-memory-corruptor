@@ -1,4 +1,4 @@
-obj-m += tg3_corruptor.o
+obj-m += tg3_corruptor.o corruptor_chrdev.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

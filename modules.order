@@ -1,0 +1,2 @@
+kernel//home/jacob/BroadcomMemoryCorruptor/tg3_corruptor.ko
+kernel//home/jacob/BroadcomMemoryCorruptor/corruptor_chrdev.ko

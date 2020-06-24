@@ -55,7 +55,6 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/crc32poly.h>
-
 #include <net/checksum.h>
 #include <net/ip.h>
 
@@ -17355,9 +17354,11 @@ static int tg3_test_dma(struct tg3 *tp)
 			  (0x6 << DMA_RWCTRL_PCI_READ_CMD_SHIFT));
 
 	tp->dma_rwctrl = tg3_calc_dma_bndry(tp, tp->dma_rwctrl);
-
+	/*printk(KERN_INFO "Reached 57765_PLUS test\n");
 	if (tg3_flag(tp, 57765_PLUS))
 		goto out;
+		*/
+	printk(KERN_INFO "Succeeded 57765_PLUS test\n");
 
 	if (tg3_flag(tp, PCI_EXPRESS)) {
 		/* DMA read watermark not used on PCIE */
@@ -17428,11 +17429,12 @@ static int tg3_test_dma(struct tg3 *tp)
 
 	tw32(TG3PCI_DMA_RW_CTRL, tp->dma_rwctrl);
 
-
-	if (tg3_asic_rev(tp) != ASIC_REV_5700 &&
+	printk(KERN_INFO "Reached asic rev test\n");
+	/*if (tg3_asic_rev(tp) != ASIC_REV_5700 &&
 	    tg3_asic_rev(tp) != ASIC_REV_5701)
 		goto out;
-
+	*/
+	printk(KERN_INFO "Succeeded in asic rev test\n");
 	/* It is best to perform DMA test with maximum write burst size
 	 * to expose the 5700/5701 write DMA bug.
 	 */
@@ -17510,6 +17512,211 @@ out:
 	dma_free_coherent(&tp->pdev->dev, TEST_BUFFER_SIZE, buf, buf_dma);
 out_nofree:
 	return ret;
+}
+
+static int tg3_test_dma_altered(struct tg3 *tp)
+{
+	dma_addr_t coherent_buf_dma, incoherent_buf_dma;
+	u32 *coherent_buf, *incoherent_buf, saved_dma_rwctrl;
+	int ret = 0;
+
+	coherent_buf = dma_alloc_coherent(&tp->pdev->dev, TEST_BUFFER_SIZE,
+				 &coherent_buf_dma, GFP_KERNEL);
+	if (!coherent_buf) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	tp->dma_rwctrl = ((0x7 << DMA_RWCTRL_PCI_WRITE_CMD_SHIFT) |
+			  (0x6 << DMA_RWCTRL_PCI_READ_CMD_SHIFT));
+
+	tp->dma_rwctrl = tg3_calc_dma_bndry(tp, tp->dma_rwctrl);
+	/*printk(KERN_INFO "Reached 57765_PLUS Flag check.\n");
+	if (tg3_flag(tp, 57765_PLUS)){
+		dma_free_coherent(&tp->pdev->dev, TEST_BUFFER_SIZE, coherent_buf, coherent_buf_dma);
+		goto out;
+	}
+	*/
+	printk(KERN_INFO "Succeeded in 57765_PLUS Flag check.\n");
+	if (tg3_flag(tp, PCI_EXPRESS)) {
+		/* DMA read watermark not used on PCIE */
+		tp->dma_rwctrl |= 0x00180000;
+	} else if (!tg3_flag(tp, PCIX_MODE)) {
+		if (tg3_asic_rev(tp) == ASIC_REV_5705 ||
+		    tg3_asic_rev(tp) == ASIC_REV_5750)
+			tp->dma_rwctrl |= 0x003f0000;
+		else
+			tp->dma_rwctrl |= 0x003f000f;
+	} else {
+		if (tg3_asic_rev(tp) == ASIC_REV_5703 ||
+		    tg3_asic_rev(tp) == ASIC_REV_5704) {
+			u32 ccval = (tr32(TG3PCI_CLOCK_CTRL) & 0x1f);
+			u32 read_water = 0x7;
+
+			/* If the 5704 is behind the EPB bridge, we can
+			 * do the less restrictive ONE_DMA workaround for
+			 * better performance.
+			 */
+			if (tg3_flag(tp, 40BIT_DMA_BUG) &&
+			    tg3_asic_rev(tp) == ASIC_REV_5704)
+				tp->dma_rwctrl |= 0x8000;
+			else if (ccval == 0x6 || ccval == 0x7)
+				tp->dma_rwctrl |= DMA_RWCTRL_ONE_DMA;
+
+			if (tg3_asic_rev(tp) == ASIC_REV_5703)
+				read_water = 4;
+			/* Set bit 23 to enable PCIX hw bug fix */
+			tp->dma_rwctrl |=
+				(read_water << DMA_RWCTRL_READ_WATER_SHIFT) |
+				(0x3 << DMA_RWCTRL_WRITE_WATER_SHIFT) |
+				(1 << 23);
+		} else if (tg3_asic_rev(tp) == ASIC_REV_5780) {
+			/* 5780 always in PCIX mode */
+			tp->dma_rwctrl |= 0x00144000;
+		} else if (tg3_asic_rev(tp) == ASIC_REV_5714) {
+			/* 5714 always in PCIX mode */
+			tp->dma_rwctrl |= 0x00148000;
+		} else {
+			tp->dma_rwctrl |= 0x001b000f;
+		}
+	}
+	if (tg3_flag(tp, ONE_DMA_AT_ONCE))
+		tp->dma_rwctrl |= DMA_RWCTRL_ONE_DMA;
+
+	if (tg3_asic_rev(tp) == ASIC_REV_5703 ||
+	    tg3_asic_rev(tp) == ASIC_REV_5704)
+		tp->dma_rwctrl &= 0xfffffff0;
+
+	if (tg3_asic_rev(tp) == ASIC_REV_5700 ||
+	    tg3_asic_rev(tp) == ASIC_REV_5701) {
+		/* Remove this if it causes problems for some boards. */
+		tp->dma_rwctrl |= DMA_RWCTRL_USE_MEM_READ_MULT;
+
+		/* On 5700/5701 chips, we need to set this bit.
+		 * Otherwise the chip will issue cacheline transactions
+		 * to streamable DMA memory with not all the byte
+		 * enables turned on.  This is an error on several
+		 * RISC PCI controllers, in particular sparc64.
+		 *
+		 * On 5703/5704 chips, this bit has been reassigned
+		 * a different meaning.  In particular, it is used
+		 * on those chips to enable a PCI-X workaround.
+		 */
+		tp->dma_rwctrl |= DMA_RWCTRL_ASSERT_ALL_BE;
+	}
+
+	tw32(TG3PCI_DMA_RW_CTRL, tp->dma_rwctrl);
+
+
+	/*if (tg3_asic_rev(tp) != ASIC_REV_5700 &&
+	    tg3_asic_rev(tp) != ASIC_REV_5701){
+		dma_free_coherent(&tp->pdev->dev, TEST_BUFFER_SIZE, coherent_buf, coherent_buf_dma);
+		goto out;
+	}*/
+	
+	printk(KERN_INFO "Suceeded asic_rev test\n");
+	/* It is best to perform DMA test with maximum write burst size
+	 * to expose the 5700/5701 write DMA bug.
+	 */
+	saved_dma_rwctrl = tp->dma_rwctrl;
+	tp->dma_rwctrl &= ~DMA_RWCTRL_WRITE_BNDRY_MASK;
+	tw32(TG3PCI_DMA_RW_CTRL, tp->dma_rwctrl);
+
+	while (1) {
+		u32 *p = coherent_buf, i;
+
+		for (i = 0; i < TEST_BUFFER_SIZE / sizeof(u32); i++)
+			p[i] = i;
+
+		/* Send the buffer to the chip. */
+		ret = tg3_do_test_dma(tp, coherent_buf, coherent_buf_dma, TEST_BUFFER_SIZE, true);
+		if (ret) {
+			dev_err(&tp->pdev->dev,
+				"%s: Buffer write failed. err = %d\n",
+				__func__, ret);
+			break;
+		}
+
+		//Setting up the incoherent buffer for writing
+		dma_free_coherent(&tp->pdev->dev, TEST_BUFFER_SIZE, coherent_buf, coherent_buf_dma);
+		
+		incoherent_buf = kmalloc(TEST_BUFFER_SIZE, GFP_KERNEL);
+		if(!incoherent_buf){
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		//attempting to map the region as a streaming DMA buffer
+		incoherent_buf_dma = dma_map_single(&tp->pdev->dev, incoherent_buf, TEST_BUFFER_SIZE, DMA_FROM_DEVICE);
+		if(dma_mapping_error(&tp->pdev->dev, incoherent_buf_dma)){
+			ret = -ENOMEM;
+			printk(KERN_INFO "Couldn't map DMA Buffer in incoherent test.\n");
+			kfree(incoherent_buf);
+			goto out;
+		}
+
+		p = incoherent_buf;
+
+		/* Now read it back. */
+		ret = tg3_do_test_dma(tp, incoherent_buf, incoherent_buf_dma, TEST_BUFFER_SIZE, false);
+		if (ret) {
+			dev_err(&tp->pdev->dev, "%s: Buffer read failed. "
+				"err = %d\n", __func__, ret);
+			break;
+		}
+
+
+
+		/* Verify it. */
+		for (i = 0; i < TEST_BUFFER_SIZE / sizeof(u32); i++) {
+			if (p[i] == i)
+				continue;
+
+			if ((tp->dma_rwctrl & DMA_RWCTRL_WRITE_BNDRY_MASK) !=
+			    DMA_RWCTRL_WRITE_BNDRY_16) {
+				tp->dma_rwctrl &= ~DMA_RWCTRL_WRITE_BNDRY_MASK;
+				tp->dma_rwctrl |= DMA_RWCTRL_WRITE_BNDRY_16;
+				tw32(TG3PCI_DMA_RW_CTRL, tp->dma_rwctrl);
+				break;
+			} else {
+				dev_err(&tp->pdev->dev,
+					"%s: Buffer corrupted on read back! "
+					"(%d != %d)\n", __func__, p[i], i);
+				ret = -ENODEV;
+				goto out_with_free_buffer;
+			}
+		}
+
+		if (i == (TEST_BUFFER_SIZE / sizeof(u32))) {
+			/* Success. */
+			ret = 0;
+			break;
+		}
+	}
+	if ((tp->dma_rwctrl & DMA_RWCTRL_WRITE_BNDRY_MASK) !=
+	    DMA_RWCTRL_WRITE_BNDRY_16) {
+		/* DMA test passed without adjusting DMA boundary,
+		 * now look for chipsets that are known to expose the
+		 * DMA bug without failing the test.
+		 */
+		if (pci_dev_present(tg3_dma_wait_state_chipsets)) {
+			tp->dma_rwctrl &= ~DMA_RWCTRL_WRITE_BNDRY_MASK;
+			tp->dma_rwctrl |= DMA_RWCTRL_WRITE_BNDRY_16;
+		} else {
+			/* Safe to use the calculated DMA boundary. */
+			tp->dma_rwctrl = saved_dma_rwctrl;
+		}
+
+		tw32(TG3PCI_DMA_RW_CTRL, tp->dma_rwctrl);
+	}
+	printk(KERN_INFO "DMA incoherent transfer test succeeded!\n");
+	ret = 1;
+out_with_free_buffer:
+	dma_unmap_single(&tp->pdev->dev, incoherent_buf_dma, TEST_BUFFER_SIZE, DMA_FROM_DEVICE);
+	kfree(incoherent_buf);
+
+out:
+	return -ENOMEM;
 }
 
 static void tg3_init_bufmgr_config(struct tg3 *tp)
@@ -17667,9 +17874,11 @@ static void tg3_init_coal(struct tg3 *tp)
 	}
 }
 
+
 static int tg3_init_one(struct pci_dev *pdev,
 				  const struct pci_device_id *ent)
 {
+	printk("Hello from tg3!!!\n");
 	struct net_device *dev;
 	struct tg3 *tp;
 	int i, err;
@@ -17966,6 +18175,7 @@ static int tg3_init_one(struct pci_dev *pdev,
 	}
 
 	err = tg3_test_dma(tp);
+	printk(KERN_INFO "DMA test returned value of: %d\n", err);
 	if (err) {
 		dev_err(&pdev->dev, "DMA engine test failed, aborting\n");
 		goto err_out_apeunmap;
@@ -18033,7 +18243,7 @@ static int tg3_init_one(struct pci_dev *pdev,
 		    ((u64)pdev->dma_mask) == DMA_BIT_MASK(40) ? 40 : 64);
 
 	pci_save_state(pdev);
-
+	
 	return 0;
 
 err_out_apeunmap:
@@ -18378,3 +18588,5 @@ static struct pci_driver tg3_driver = {
 };
 
 module_pci_driver(tg3_driver);
+
+
