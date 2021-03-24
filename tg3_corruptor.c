@@ -18173,8 +18173,8 @@ static int tg3_init_one(struct pci_dev *pdev,
 		tg3_halt(tp, RESET_KIND_SHUTDOWN, 1);
 		tg3_full_unlock(tp);
 	}
-
-	err = tg3_test_dma(tp);
+	printk(KERN_INFO "ASIC REV ID is: %x\n", tg3_asic_rev(tp));
+	err = -12;//tg3_test_dma(tp);
 	printk(KERN_INFO "DMA test returned value of: %d\n", err);
 	if (err) {
 		dev_err(&pdev->dev, "DMA engine test failed, aborting\n");
